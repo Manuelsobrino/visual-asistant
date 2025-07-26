@@ -1,10 +1,18 @@
-# Visual Aid Assistant - Claude Code Technical Implementation Plan
+# Visual Aid Assistant - Technical Implementation Plan (TensorFlow.js)
 
 ## 🎯 Project Architecture Overview
 **Framework**: React Native with Expo (SDK 50+)  
 **Target Platform**: Android (API Level 24+)  
-**AI Stack**: Google ML Kit + Google Vertex AI (Gemini 2.5)  
+**Vision Stack**: TensorFlow.js + COCO-SSD Model  
+**AI Stack**: Google Vertex AI (Gemini 2.5)  
 **Voice Stack**: Expo Speech APIs  
+
+### Why TensorFlow.js over ML Kit?
+- **80+ detectable objects** including keys, wallet, phone, laptop, cup, etc.
+- **Specific object recognition** vs ML Kit's 5 broad categories
+- **Perfect for hackathon** - works out of the box
+- **Lightweight model** (COCO-SSD lite_mobilenet_v2)
+- **Real-time performance** on mobile devices
 
 ---
 
@@ -52,9 +60,12 @@
 ### Computer Vision Dependencies
 ```json
 {
-  "@react-native-ml-kit/object-detection": "^0.8.0",
-  "react-native-vision-camera": "^3.8.0",
-  "react-native-worklets-core": "^0.3.0"
+  "@tensorflow/tfjs": "^4.15.0",
+  "@tensorflow/tfjs-react-native": "^0.8.0",
+  "@tensorflow-models/coco-ssd": "^2.2.3",
+  "expo-gl": "~13.6.0",
+  "expo-gl-cpp": "~13.6.0",
+  "expo-camera": "~14.0.0"
 }
 ```
 
@@ -89,13 +100,13 @@ visual-aid-assistant/
 │   ├── App.js                     # Main app entry point
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── CameraView.js      # Camera component with ML Kit
+│   │   │   ├── CameraView.js      # Camera component with TensorFlow
 │   │   │   ├── ObjectDetectionOverlay.js # Visual bounding boxes
 │   │   │   ├── VoiceInterface.js  # Speech recognition & TTS
 │   │   │   └── AIProcessor.js     # Backend API integration
 │   │   ├── services/
 │   │   │   ├── api.js             # Backend API client
-│   │   │   ├── mlkit.js           # Object detection service
+│   │   │   ├── tensorflow.js      # TensorFlow.js object detection
 │   │   │   ├── spatial.js         # Spatial positioning logic
 │   │   │   ├── voice.js           # Voice processing service
 │   │   │   └── permissions.js     # Permission handling
@@ -106,14 +117,14 @@ visual-aid-assistant/
 │   │   └── hooks/
 │   │       ├── useCamera.js       # Camera management hook
 │   │       ├── useVoice.js        # Voice processing hook
-│   │       └── useObjectDetection.js  # ML Kit integration hook
+│   │       └── useObjectDetection.js  # TensorFlow integration hook
 │   ├── assets/
 │   │   └── sounds/
 │   │       ├── listening.mp3      # Voice feedback sounds
 │   │       └── found.mp3
 │   └── config/
 │       ├── camera.js              # Camera configuration
-│       ├── mlkit.js               # ML Kit settings
+│       ├── tensorflow.js          # TensorFlow settings
 │       └── api.js                 # API endpoint configuration
 ├── backend/                       # Node.js Express Backend
 │   ├── Dockerfile
@@ -151,75 +162,137 @@ visual-aid-assistant/
 
 ## 🔧 Technical Implementation Specifications
 
-### 1. Camera & ML Kit Integration
+### 1. Camera & TensorFlow.js Integration
 
-#### File: `src/services/mlkit.js`
+#### File: `frontend/src/services/tensorflow.js`
 ```javascript
-import { ObjectDetection } from '@react-native-ml-kit/object-detection';
+import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-react-native';
+import * as cocoSsd from '@tensorflow-models/coco-ssd';
 
-export class MLKitService {
+export class TensorFlowService {
   constructor() {
-    this.detector = ObjectDetection.createDetector({
-      mode: 'stream',
-      classifyObjects: true,
-      multipleObjects: true
-    });
+    this.model = null;
+    this.isReady = false;
   }
 
-  async detectObjects(imageUri) {
-    const objects = await this.detector.detect(imageUri);
-    return objects.map(obj => ({
-      label: obj.labels[0]?.text || 'unknown',
-      confidence: obj.labels[0]?.confidence || 0,
+  async initialize() {
+    // Wait for TensorFlow.js to initialize
+    await tf.ready();
+    
+    // Load COCO-SSD model
+    this.model = await cocoSsd.load({
+      base: 'lite_mobilenet_v2' // Lightweight model for mobile
+    });
+    
+    this.isReady = true;
+  }
+
+  async detectObjects(imageData) {
+    if (!this.isReady) {
+      throw new Error('TensorFlow model not initialized');
+    }
+
+    // Run detection
+    const predictions = await this.model.detect(imageData);
+    
+    // Format predictions for our app
+    return predictions.map(pred => ({
+      label: pred.class,
+      confidence: pred.score,
       boundingBox: {
-        x: obj.frame.x,
-        y: obj.frame.y,
-        width: obj.frame.width,
-        height: obj.frame.height
+        x: pred.bbox[0],
+        y: pred.bbox[1],
+        width: pred.bbox[2],
+        height: pred.bbox[3]
       }
     }));
   }
+
+  // COCO-SSD can detect these objects:
+  // person, bicycle, car, motorcycle, airplane, bus, train, truck, boat,
+  // traffic light, fire hydrant, stop sign, parking meter, bench, bird,
+  // cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe, backpack,
+  // umbrella, handbag, tie, suitcase, frisbee, skis, snowboard, sports ball,
+  // kite, baseball bat, baseball glove, skateboard, surfboard, tennis racket,
+  // bottle, wine glass, cup, fork, knife, spoon, bowl, banana, apple,
+  // sandwich, orange, broccoli, carrot, hot dog, pizza, donut, cake,
+  // chair, couch, potted plant, bed, dining table, toilet, tv, laptop,
+  // mouse, remote, keyboard, cell phone, microwave, oven, toaster, sink,
+  // refrigerator, book, clock, vase, scissors, teddy bear, hair drier, toothbrush
 }
 ```
 
-#### File: `src/components/CameraView.js`
+#### File: `frontend/src/components/CameraView.js`
 ```javascript
+import React, { useRef, useState, useEffect } from 'react';
+import { View, Platform } from 'react-native';
 import { Camera } from 'expo-camera';
-import { useRef, useState, useEffect } from 'react';
-import { MLKitService } from '../services/mlkit';
+import * as GL from 'expo-gl';
+import { GLView } from 'expo-gl';
+import { TensorFlowService } from '../services/tensorflow';
+import { cameraWithTensors } from '@tensorflow/tfjs-react-native';
+
+const TensorCamera = cameraWithTensors(Camera);
 
 export const CameraView = ({ onObjectsDetected }) => {
-  const cameraRef = useRef(null);
-  const mlKit = new MLKitService();
+  const [tfService] = useState(new TensorFlowService());
+  const [isModelReady, setIsModelReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!isProcessing && cameraRef.current) {
+    const initializeTensorFlow = async () => {
+      await tfService.initialize();
+      setIsModelReady(true);
+    };
+    initializeTensorFlow();
+  }, []);
+
+  const processImage = async (images, updatePreview, gl) => {
+    if (!isModelReady || isProcessing) return;
+    
+    const loop = async () => {
+      if (!isProcessing) {
         setIsProcessing(true);
+        
         try {
-          const photo = await cameraRef.current.takePictureAsync({
-            base64: true,
-            quality: 0.5
-          });
-          const objects = await mlKit.detectObjects(photo.uri);
-          onObjectsDetected(objects);
+          const nextImageTensor = images.next().value;
+          if (nextImageTensor) {
+            const objects = await tfService.detectObjects(nextImageTensor);
+            onObjectsDetected(objects);
+            nextImageTensor.dispose();
+          }
         } catch (error) {
           console.error('Detection error:', error);
         }
+        
         setIsProcessing(false);
       }
-    }, 1000); // Process every second
+      
+      requestAnimationFrame(loop);
+    };
+    loop();
+  };
 
-    return () => clearInterval(interval);
-  }, [isProcessing]);
+  const textureDims = Platform.OS === 'ios' ? 
+    { width: 1080, height: 1920 } : 
+    { width: 1080, height: 1920 };
+
+  if (!isModelReady) {
+    return <View style={{ flex: 1, backgroundColor: 'black' }} />;
+  }
 
   return (
-    <Camera
-      ref={cameraRef}
+    <TensorCamera
       style={{ flex: 1 }}
       type={Camera.Constants.Type.back}
-      autoFocus={Camera.Constants.AutoFocus.on}
+      onReady={processImage}
+      resizeHeight={200}
+      resizeWidth={152}
+      resizeDepth={3}
+      autorender={true}
+      cameraTextureHeight={textureDims.height}
+      cameraTextureWidth={textureDims.width}
     />
   );
 };
@@ -598,6 +671,8 @@ import { ObjectDetectionOverlay } from './src/components/ObjectDetectionOverlay'
 import { VoiceService } from './src/services/voice';
 import { ApiService } from './src/services/api';
 import * as Device from 'expo-device';
+import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -607,8 +682,16 @@ export default function App() {
   const [voiceService] = useState(new VoiceService());
   const [apiService] = useState(new ApiService());
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isTfReady, setIsTfReady] = useState(false);
 
   useEffect(() => {
+    // Initialize TensorFlow.js
+    const initTf = async () => {
+      await tf.ready();
+      setIsTfReady(true);
+    };
+    initTf();
+
     // Authenticate with device ID
     const authenticate = async () => {
       try {
@@ -662,6 +745,14 @@ export default function App() {
     setDetectedObjects(objects);
   };
 
+  if (!isTfReady || !isAuthenticated) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Initializing Visual Assistant...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <CameraView onObjectsDetected={handleObjectsDetected} />
@@ -682,6 +773,17 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'black',
+  },
+  loadingText: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
   },
   processingOverlay: {
     position: 'absolute',
@@ -1259,8 +1361,11 @@ docker-compose exec backend npm run migrate
     "expo-av": "~13.10.0",
     "expo-speech": "~11.7.0",
     "expo-device": "~5.9.0",
-    "@react-native-ml-kit/object-detection": "^0.8.0",
-    "react-native-vision-camera": "^3.8.0",
+    "expo-gl": "~13.6.0",
+    "expo-gl-cpp": "~13.6.0",
+    "@tensorflow/tfjs": "^4.15.0",
+    "@tensorflow/tfjs-react-native": "^0.8.0",
+    "@tensorflow-models/coco-ssd": "^2.2.3",
     "@react-native-voice/voice": "^3.2.4",
     "react-native-permissions": "^4.1.0",
     "react-native-haptic-feedback": "^2.2.0",
@@ -1293,15 +1398,20 @@ docker-compose exec backend npm run migrate
 
 ### Testing Strategy
 ```bash
-# Test object detection accuracy
-- Keys, phone, wallet, laptop, mug
+# Test object detection accuracy (COCO-SSD supported objects)
+- cell phone, laptop, keyboard, mouse
+- cup, bottle, bowl, fork, knife, spoon
+- backpack, handbag, suitcase
+- book, clock, scissors
+- chair, couch, dining table, tv
 - Various lighting conditions
 - Different distances and angles
 
 # Test voice recognition
-- "Find my keys"
-- "Where are my keys?"
-- "Look for my phone"
+- "Find my phone"
+- "Where is my laptop?"
+- "Look for my backpack"
+- "Find my cup"
 - Background noise tolerance
 
 # Test spatial accuracy
