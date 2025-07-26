@@ -4,8 +4,9 @@
 **Framework**: React Native with Expo (SDK 50+)  
 **Target Platform**: Android (API Level 24+)  
 **Vision Stack**: TensorFlow.js + COCO-SSD Model  
-**AI Stack**: Google Vertex AI (Gemini 2.5)  
-**Voice Stack**: Expo Speech APIs  
+**AI Stack**: Google Gemini API (Direct)  
+**Voice Stack**: Expo Speech APIs + Hardware Button Activation  
+**Interface**: Voice-only (with visual demo mode for presentation)  
 
 ### Why TensorFlow.js over ML Kit?
 - **80+ detectable objects** including keys, wallet, phone, laptop, cup, etc.
@@ -13,6 +14,13 @@
 - **Perfect for hackathon** - works out of the box
 - **Lightweight model** (COCO-SSD lite_mobilenet_v2)
 - **Real-time performance** on mobile devices
+
+### Voice-First Design Principles
+- **No visual UI** for end users (blind accessibility)
+- **Hardware button activation** (volume key press)
+- **Continuous voice guidance** 
+- **Demo mode** shows CV bounding boxes for presentation only
+- **100% hands-free operation**
 
 ---
 
@@ -72,7 +80,6 @@
 ### AI/LLM Dependencies
 ```json
 {
-  "@google-cloud/aiplatform": "^3.15.0",
   "@google/generative-ai": "^0.7.1",
   "axios": "^1.6.0"
 }
@@ -489,8 +496,11 @@ const { cacheService } = require('./cacheService');
 
 class GeminiService {
   constructor() {
+    // Direct Gemini API - no Vertex AI needed
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    this.model = this.genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash" // Fast model ideal for real-time responses
+    });
   }
 
   async generateSpatialGuidance(detectedObjects, targetObject, userQuery) {
@@ -1091,7 +1101,7 @@ PORT=3000
 JWT_SECRET=your-super-secret-jwt-key-change-this
 ALLOWED_ORIGINS=http://localhost:19000,http://localhost:19001
 
-# External APIs
+# External APIs (Get key at: https://makersuite.google.com)
 GEMINI_API_KEY=your-gemini-api-key
 
 # Database
@@ -1376,25 +1386,56 @@ docker-compose exec backend npm run migrate
 
 ---
 
-## 🚀 Implementation Priority & Testing
+## 🚀 Updated Hackathon Sprint Plan
 
-### Phase 1: Core Infrastructure (Priority 1)
-1. **Camera setup** with basic preview
-2. **ML Kit integration** with object detection
-3. **Basic TTS** for voice output
-4. **Simple spatial processing** (direction only)
+### Sprint 1: Foundation Architecture (1 hour)
+• Create project structure (frontend/, backend/, nginx/)
+• Set up Docker environment with all services
+• Initialize Express backend with basic routes
+• Configure Redis and PostgreSQL
+• Set up Gemini API (direct, not Vertex)
+• Create .env files and authentication flow
+• Test backend health endpoints
 
-### Phase 2: AI Integration (Priority 2)
-1. **Gemini API integration** with basic prompts
-2. **Voice command parsing** for "find X" commands
-3. **Enhanced spatial processing** (distance, nearby objects)
-4. **Error handling** and fallbacks
+### Sprint 2: Voice-First Mobile App (1 hour)
+• Initialize Expo React Native project
+• Set up TensorFlow.js and load COCO-SSD model
+• Implement hardware button listener (volume key activation)
+• Create voice service with speech-to-text and TTS
+• Build continuous camera capture (no UI)
+• Test on Android device
 
-### Phase 3: Demo Features (Priority 3)
-1. **Visual overlay** with bounding boxes
-2. **Real-time performance optimization**
-3. **Demo script preparation**
-4. **Edge case handling**
+### Sprint 3: Computer Vision + Demo Visuals (1 hour)
+• Implement real-time object detection loop
+• Create visual overlay system for demo mode:
+  - Colored bounding boxes (green/yellow/red by confidence)
+  - Percentage labels (e.g., "Phone 92%")
+  - Object count display
+  - FPS counter
+• Add smooth animations for tracking
+• Test detection accuracy
+
+### Sprint 4: Intelligent Voice Assistant (1 hour)
+• Connect detection results to voice responses
+• Implement spatial calculations (left/right/distance)
+• Parse voice commands ("Find my phone", "What's in front of me?")
+• Integrate Gemini for natural language responses
+• Add context awareness (prioritize relevant objects)
+
+### Sprint 5: Backend Integration (45 min)
+• Connect mobile app to backend API
+• Implement vision processing endpoint
+• Add response caching for performance
+• Set up rate limiting
+• Test end-to-end flow
+
+### Sprint 6: Demo Polish (45 min)
+• Create presentation mode with split view
+• Add visual indicators for listening/processing states
+• Prepare demo scenarios with common objects
+• Optimize performance
+• Practice presentation flow
+• Handle edge cases
 
 ### Testing Strategy
 ```bash
